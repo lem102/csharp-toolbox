@@ -1,7 +1,8 @@
-;;; csharp-toolbox.el --- Utilities for csharp
+;;; csharp-toolbox.el --- Utilities for csharp  -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; 
+;; Toolbox of utility functions for csharp code/projects.  Format
+;; command requires `csharpier-wrapper' to be on path.
 
 (require 'treesit)
 (require 'xref)
@@ -9,12 +10,12 @@
 
 ;;; Code:
 
-;; FIXME: follow-mode causes strange behaviour
-(defun jacob-format-csharp-statement ()
+;; JACOBTODO: follow-mode causes strange behaviour
+(defun csharp-toolbox-format-statement ()
   "Format the csharp statement at point."
   (interactive)
   (let* ((get-statement-bounds (lambda ()
-                                 (let ((statement-node (jacob-csharp--get-parent-node "statement")))
+                                 (let ((statement-node (csharp-toolbox--get-parent-node "statement")))
                                    (cons (treesit-node-start statement-node)
                                          (treesit-node-end statement-node)))))
          (node-start (car (funcall get-statement-bounds))))
@@ -50,7 +51,49 @@
         (goto-char node-end)
         (delete-char 1)))))
 
-(defun jacob-csharp-toggle-async ()
+;; JACOBTODO: follow-mode causes strange behaviour
+;; JACOBTODO: reduce duplication
+(defun csharp-toolbox-format-method ()
+  "Format the csharp method at point."
+  (interactive)
+  (let* ((get-method-bounds (lambda ()
+                              (let ((method-node (csharp-toolbox--get-parent-node "method_declaration")))
+                                (cons (treesit-node-start method-node)
+                                      (treesit-node-end method-node)))))
+         (node-start (car (funcall get-method-bounds))))
+    (save-excursion
+      (let* ((node-end (cdr (funcall get-method-bounds)))
+             (source-text (buffer-substring-no-properties node-start node-end)))
+        (shell-command-on-region node-start
+                                 node-end
+                                 (format "csharpier-wrapper %s %d method"
+                                         (shell-quote-argument source-text)
+                                         (save-excursion
+                                           (goto-char node-start)
+                                           (- 100
+                                              (- (point)
+                                                 (progn
+                                                   (beginning-of-line)
+                                                   (point))))))
+                                 nil
+                                 'no-mark)
+        (goto-char node-start))
+      (let* ((node-end (cdr (funcall get-method-bounds)))
+             (indentation-amount (save-excursion
+                                   (goto-char node-start)
+                                   (- (point)
+                                      (progn
+                                        (beginning-of-line)
+                                        (point))))))
+        (indent-code-rigidly node-start
+                             node-end
+                             indentation-amount)
+        (goto-char node-start))
+      (let* ((node-end (cdr (funcall get-method-bounds))))
+        (goto-char node-end)
+        (delete-char 1)))))
+
+(defun csharp-toolbox-toggle-async ()
   "Toggle method at point async."
   (interactive)
   (let ((method-node
@@ -81,16 +124,16 @@
                  (goto-char (treesit-node-start async-node))
                  (re-search-forward "async Task<.*>")
                  (replace-match (treesit-node-text
-                                 (seq-first
-                                  (treesit-query-capture type-node
-                                                         '((type_argument_list
-                                                            "<"
-                                                            (_)
-                                                            @arguments
-                                                            ">"))
-                                                         nil
-                                                         nil
-                                                         "NODE-ONLY")))))
+                                 (car (last
+                                       (treesit-query-capture type-node
+                                                              '((type_argument_list
+                                                                 "<"
+                                                                 (_)
+                                                                 @arguments
+                                                                 ">"))
+                                                              nil
+                                                              nil
+                                                              "NODE-ONLY"))))))
                 ((equal (treesit-node-text type-node) "void")
                  (goto-char (treesit-node-start type-node))
                  (delete-region (treesit-node-start type-node)
@@ -102,111 +145,14 @@
                  (replace-match (format "async Task<%s>"
                                         (treesit-node-text type-node))))))))))
 
-(defun jacob-csharp-highlight-statement ()
+(defun csharp-toolbox-highlight-statement ()
   "Select statement at point."
   (interactive)
-  (let ((node (jacob-treesit-dominating-node-at-point "statement")))
+  (let ((node (csharp-toolbox--get-parent-node "statement")))
     (goto-char (treesit-node-end node))
     (set-mark (treesit-node-start node))))
 
-(defun jacob-csharp-debug-test (no-debug)
-  "Debug test at point.
-
-Run without debugging if NO-DEBUG is non-nil."
-  (interactive "P")
-  (let* ((test-name (let* ((test-node (jacob-treesit-dominating-node-at-point "method_declaration"))
-                           (name-node (car (last (treesit-filter-child test-node
-                                                                       (lambda (node)
-                                                                         (string-match "identifier" (treesit-node-type node))))))))
-                      (substring-no-properties (treesit-node-text name-node)))))
-    (let ((default-directory (locate-dominating-file (file-name-directory (buffer-file-name (current-buffer)))
-                                                     (lambda (dir)
-                                                       (not (seq-empty-p (seq-filter (lambda (filename)
-                                                                                       (string-match-p "csproj" filename))
-                                                                                     (directory-files dir))))))))
-      (compile (format "VSTEST_HOST_DEBUG=%s dotnet test --filter DisplayName~%s"
-                       (if no-debug "0" "1")
-                       test-name))
-      (with-current-buffer "*compilation*"
-        (add-hook 'compilation-filter-hook
-                  (lambda ()
-                    (let ((inserted-text (buffer-substring-no-properties compilation-filter-start (point))))
-                      (when (string-match-p "Process Id:" inserted-text)
-                        (goto-char compilation-filter-start)
-                        (search-forward "Process Id: ")
-                        (netcoredbg (format "netcoredbg --attach %s" (thing-at-point 'word 'no-properties))))))
-                  nil
-                  'local)))))
-
-(defun jacob-csharp-debug-dll ()
-  "Attach `netcoredbg' to process that corresponds to current csharp file."
-  (interactive)
-  (let ((process-name (file-name-sans-extension
-                       (car
-                        (directory-files
-                         (locate-dominating-file
-                          (file-name-directory (buffer-file-name (current-buffer)))
-                          (lambda (dir)
-                            (not (seq-empty-p (seq-filter (lambda (filename)
-                                                            (string-match-p "csproj$" filename))
-                                                          (directory-files dir))))))
-                         nil
-                         "csproj")))))
-    (gud-gdb (format "netcoredbg --attach %s"
-                     (seq-find (lambda (x)
-                                 (string-match-p (format "%s$" process-name)
-                                                 (cdr (assoc 'args
-                                                             (process-attributes x)))))
-                               (list-system-processes))))))
-
-(defun jacob-csharp-debug-process ()
-  "Choose process to debug."
-  (interactive)
-  (netcoredbg (format "netcoredbg --attach %s"
-                      (let ((choices
-                             (seq-map (lambda (x)
-                                        (cons (file-name-nondirectory (alist-get 'args
-                                                                                 x))
-                                              (alist-get 'id
-                                                         x)))
-                                      (seq-filter (lambda (x)
-                                                    ;; TODO: use project to work out regex
-                                                    (string-match-p "/home/jacobl/dev/tappit/tappit-v2/"
-                                                                    (alist-get 'args
-                                                                               x)))
-                                                  (seq-map (lambda (x)
-                                                             (cons (cons 'id
-                                                                         x)
-                                                                   (process-attributes x)))
-                                                           (list-system-processes))))))
-                        (cdr (assoc-string (completing-read "Process to debug: "
-                                                            choices)
-                                           choices))))))
-
-(defun tappit-process-id ()
-  "Get process id of tappit program."
-  (interactive)
-  (let ((choices
-         (seq-map (lambda (x)
-                    (cons (file-name-nondirectory (alist-get 'args
-                                                             x))
-                          (alist-get 'id
-                                     x)))
-                  (seq-filter (lambda (x)
-                                ;; TODO: use project to work out regex
-                                (string-match-p "/home/jacobl/dev/tappit/tappit-v2/"
-                                                (alist-get 'args
-                                                           x)))
-                              (seq-map (lambda (x)
-                                         (cons (cons 'id
-                                                     x)
-                                               (process-attributes x)))
-                                       (list-system-processes))))))
-    (cdr (assoc-string (completing-read "Process to debug: "
-                                        choices)
-                       choices))))
-
-(defun jacob-csharp-convert-namespace ()
+(defun csharp-toolbox-convert-namespace ()
   "Convert namespace block into namespace declaration."
   (interactive)
   (save-excursion
@@ -244,7 +190,7 @@ Run without debugging if NO-DEBUG is non-nil."
                                (buffer-end 1)
                                -4))))))
 
-(defun jacob-csharp-synchronise-related-methods ()
+(defun csharp-toolbox-synchronise-related-methods ()
   "Synchronise signature of \"related\" methods with the method at point.
 
 Related meaning the interface for the method and the other
@@ -290,15 +236,23 @@ implementations."
                   (goto-char (point-min))
                   (forward-line (xref-file-location-line reference))
                   ;; (forward-char (xref-file-location-column reference))
-                  ;; ah fuck
                   ;; i can't get the references to the other methods
-                  ;; bugger
                   ;; this function won't work ;_;
                   ;; but i learnt some stuff i guess
                   )
                 references)))))
 
-(defun jacob-csharp-run-test (debug)
+(defun csharp-toolbox--select-dll ()
+  "Function to select dll for dape."
+  (completing-read "dll: "
+                   (seq-map (lambda (filename)
+                              (cons (file-name-nondirectory filename)
+                                    filename))
+                            (directory-files-recursively
+                             (project-root (project-current))
+                             "\\.dll"))))
+
+(defun csharp-toolbox-run-test (debug)
   "Run test at point.
 
 Set the environment variable `VSTEST_HOST_DEBUG' to 1 if DEBUG is
@@ -308,16 +262,16 @@ non-nil."
           (format "%s.%s.%s"
                   (treesit-node-text
                    (treesit-node-child-by-field-name
-                    (jacob-csharp--get-namespace-node)
+                    (csharp-toolbox--get-namespace-node)
                     "name")
                    "NO_PROPERTY")
                   (treesit-node-text
-                   (jacob-csharp--get-identifier-child
-                    (jacob-csharp--get-class-node))
+                   (csharp-toolbox--get-identifier-child
+                    (csharp-toolbox--get-class-node))
                    "NO_PROPERTY")
                   (treesit-node-text
-                   (jacob-csharp--get-identifier-child
-                    (jacob-csharp--get-method-node))
+                   (csharp-toolbox--get-identifier-child
+                    (csharp-toolbox--get-method-node))
                    "NO_PROPERTY")))
          (default-directory
           (locate-dominating-file
@@ -343,7 +297,7 @@ non-nil."
                         (setq process-id (thing-at-point 'word "NO_PROPERTIES")))
                       (when (string-match-p "Waiting for debugger attach" inserted-text)
                         (let* ((dll
-                                (jacob-select-dll))
+                                (csharp-toolbox--select-dll))
                                (config
                                 `(modes (csharp-mode csharp-ts-mode)
                                         ensure dape-ensure-command
@@ -358,19 +312,19 @@ non-nil."
                   nil
                   "LOCAL")))))
 
-(defun jacob-csharp--get-namespace-node ()
+(defun csharp-toolbox--get-namespace-node ()
   "Get the namespace node at point."
-  (jacob-csharp--get-parent-node "\\(file_scoped_\\)?namespace_declaration"))
+  (csharp-toolbox--get-parent-node "\\(file_scoped_\\)?namespace_declaration"))
 
-(defun jacob-csharp--get-class-node ()
+(defun csharp-toolbox--get-class-node ()
   "Get the class node at point."
-  (jacob-csharp--get-parent-node "class_declaration"))
+  (csharp-toolbox--get-parent-node "class_declaration"))
 
-(defun jacob-csharp--get-method-node ()
+(defun csharp-toolbox--get-method-node ()
   "Get the method node at point."
-  (jacob-csharp--get-parent-node "method_declaration"))
+  (csharp-toolbox--get-parent-node "method_declaration"))
 
-(defun jacob-csharp--get-parent-node (regexp)
+(defun csharp-toolbox--get-parent-node (regexp)
   "Find dominating node at point that matches REGEXP."
   (treesit-parent-until (treesit-node-at (point))
                         (lambda (node)
@@ -378,7 +332,7 @@ non-nil."
                                           (treesit-node-type node)))
                         t))
 
-(defun jacob-csharp--get-identifier-child (node)
+(defun csharp-toolbox--get-identifier-child (node)
   "Get the identifier node child of NODE.
 
 Useful for getting the name node of classes or methods."
@@ -391,7 +345,7 @@ Useful for getting the name node of classes or methods."
 
 ;; JACOBTODO: try make a function for creating fields and adding them to the constructor
 
-(defun jacob-csharp-rename-file ()
+(defun csharp-toolbox-rename-file ()
   "Rename the current file and class/whatever."
   (interactive)
   (let ((new-name (read-from-minibuffer "Rename window/class to: "))
