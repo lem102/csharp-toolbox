@@ -360,6 +360,32 @@ Useful for getting the name node of classes or methods."
     (goto-char (car class-name-range))
     (insert new-name)))
 
+;; JACOBTODO: figure out what your doing with this. Use in autoinsert?
+(defun jacob-xxx ()
+  "fixup the namespace used in the current file."
+  (interactive)
+  (when-let* ((query '((file_scoped_namespace_declaration name: [(identifier) (qualified_name)] @n)))
+              (adjacent-file (seq-find (lambda (filename)
+                                         (and (not (string= filename (file-name-nondirectory buffer-file-name)))
+                                              (string= (file-name-extension filename)
+                                                       "cs")))
+                                       (directory-files default-directory)))
+              (adjacent-namespace (with-relative-file adjacent-file
+                                    (treesit-node-text
+                                     (car (treesit-query-capture (treesit-buffer-root-node 'c-sharp)
+                                                                 query
+                                                                 nil
+                                                                 nil
+                                                                 'node-only)))))
+              (current-namespace-range (car (treesit-query-range (treesit-buffer-root-node 'c-sharp)
+                                                                 query
+                                                                 nil
+                                                                 nil))))
+    (delete-region (car current-namespace-range)
+                   (cdr current-namespace-range))
+    (goto-char (car current-namespace-range))
+    (insert adjacent-namespace)))
+
 (provide 'csharp-toolbox)
 
 ;;; csharp-toolbox.el ends here
