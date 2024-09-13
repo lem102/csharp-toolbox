@@ -93,6 +93,10 @@
         (goto-char node-end)
         (delete-char 1)))))
 
+;; JACOBTODO: fix cases:
+;; adding await to Result<Response>
+;; adding await to IActionResult
+;; case where method returns task but no async modifier
 (defun csharp-toolbox-toggle-async ()
   "Toggle method at point async."
   (interactive)
