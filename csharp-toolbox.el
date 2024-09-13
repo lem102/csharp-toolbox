@@ -93,10 +93,9 @@
         (goto-char node-end)
         (delete-char 1)))))
 
-;; JACOBTODO: fix cases:
-;; adding await to Result<Response>
-;; adding await to IActionResult
-;; case where method returns task but no async modifier
+;; JACOBTODO: fix case where method returns task but no async modifier
+;; JACOBTODO: can i use queries more effectively to make this easier
+;; to work with?
 (defun csharp-toolbox-toggle-async ()
   "Toggle method at point async."
   (interactive)
@@ -123,7 +122,7 @@
                       (equal (treesit-node-text type-node) "Task"))
                  (goto-char (treesit-node-start async-node))
                  (search-forward "async Task")
-                 (replace-match "void"))
+                 (replace-match "void" "FIXEDCASE"))
                 (async-node
                  (goto-char (treesit-node-start async-node))
                  (re-search-forward "async Task<.*>")
@@ -137,7 +136,8 @@
                                                                  ">"))
                                                               nil
                                                               nil
-                                                              "NODE-ONLY"))))))
+                                                              "NODE-ONLY"))))
+                                "FIXEDCASE"))
                 ((equal (treesit-node-text type-node) "void")
                  (goto-char (treesit-node-start type-node))
                  (delete-region (treesit-node-start type-node)
@@ -147,7 +147,8 @@
                  (goto-char (treesit-node-start type-node))
                  (search-forward (treesit-node-text type-node))
                  (replace-match (format "async Task<%s>"
-                                        (treesit-node-text type-node))))))))))
+                                        (treesit-node-text type-node))
+                                "FIXEDCASE"))))))))
 
 (defun csharp-toolbox-highlight-statement ()
   "Select statement at point."
