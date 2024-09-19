@@ -299,8 +299,7 @@ non-nil."
                       (when (string-match-p "Process Id:" inserted-text)
                         (goto-char compilation-filter-start)
                         (search-forward "Process Id: ")
-                        (setq process-id (thing-at-point 'word "NO_PROPERTIES")))
-                      (when (string-match-p "Waiting for debugger attach" inserted-text)
+                        (setq process-id (thing-at-point 'word "NO_PROPERTIES"))
                         (let* ((dll
                                 (csharp-toolbox--select-dll))
                                (config
@@ -313,7 +312,9 @@ non-nil."
                                         :program ,dll
                                         :stopAtEntry t
                                         :processId ,process-id)))
-                          (dape config)))))
+                          (dape config)))
+                      
+                      ))
                   nil
                   "LOCAL")))))
 
