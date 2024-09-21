@@ -93,56 +93,47 @@
         (goto-char node-end)
         (delete-char 1)))))
 
-;; JACOBTODO: fix case where method returns task but no async modifier
-;; JACOBTODO: can i use queries more effectively to make this easier
-;; to work with?
 (defun csharp-toolbox-toggle-async ()
   "Toggle method at point async."
   (interactive)
-  (let ((method-node
-         (treesit-parent-until (treesit-node-at (point))
-                               (lambda (node)
-                                 (equal "method_declaration"
-                                        (treesit-node-type node))))))
+  (let ((method-node (csharp-toolbox--get-method-node)))
     (if (null method-node)
         (message "method not found")
-      (let ((async-node
-             (seq-first
-              (treesit-query-capture method-node
-                                     '(("async" @async))
-                                     nil
-                                     nil
-                                     "NODE-ONLY")))
-            (type-node
-             ;; 4th method node child from the back is the method type
-             (let ((children (treesit-node-children method-node)))
-               (seq-elt children (- (length children) 4)))))
+      (let* ((query-results (treesit-query-capture
+                             method-node
+                             '((method_declaration
+                                (modifier "async") :? @async
+                                [(predefined_type)
+                                 (identifier)
+                                 (generic_name (type_argument_list
+                                                "<"
+                                                :anchor
+                                                (_) @wrapped-type
+                                                :anchor
+                                                ">"))]
+                                @type
+                                :anchor (identifier) :anchor (parameter_list) :anchor (block)))))
+             (async-node (alist-get 'async query-results))
+             (type-node (alist-get 'type query-results)))
         (save-excursion
-          (cond ((and async-node
-                      (equal (treesit-node-text type-node) "Task"))
+          (cond ((and async-node (equal (treesit-node-text type-node) "Task"))
                  (goto-char (treesit-node-start async-node))
                  (search-forward "async Task")
                  (replace-match "void" "FIXEDCASE"))
                 (async-node
                  (goto-char (treesit-node-start async-node))
                  (re-search-forward "async Task<.*>")
-                 (replace-match (treesit-node-text
-                                 (car (last
-                                       (treesit-query-capture type-node
-                                                              '((type_argument_list
-                                                                 "<"
-                                                                 (_)
-                                                                 @arguments
-                                                                 ">"))
-                                                              nil
-                                                              nil
-                                                              "NODE-ONLY"))))
+                 (replace-match (treesit-node-text (alist-get 'wrapped-type query-results))
                                 "FIXEDCASE"))
+                ;; no async modifier
                 ((equal (treesit-node-text type-node) "void")
                  (goto-char (treesit-node-start type-node))
                  (delete-region (treesit-node-start type-node)
                                 (treesit-node-end type-node))
                  (insert "async Task"))
+                ((string-match-p "^Task" (treesit-node-text type-node))
+                 (goto-char (treesit-node-start type-node))
+                 (insert "async "))
                 (t
                  (goto-char (treesit-node-start type-node))
                  (search-forward (treesit-node-text type-node))
